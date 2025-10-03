@@ -1,42 +1,36 @@
 pipeline {
     agent any
-    
+
     environment {
-        DOCKER_IMAGE = 'anirudev/apachewebsite:latest'
-        KUBECONFIG = credentials('kubeconfig')
-        LANG = 'en_US.UTF-8'
-        LC_ALL = 'en_US.UTF-8'
+        DOCKER_IMAGE = "sourav16031998/apachewebsite:latest"
+        DOCKER_CREDENTIALS = "dockerhub-credentials"
     }
 
     stages {
-        stage('Clone Git repository') {
+
+        stage('Checkout Git') {
             steps {
-                git 'https://github.com/Pvradmin-1234/apachewebsite.git'
+                git url: 'https://github.com/Pvradmin-1234/apachewebsite.git', branch: 'master'
             }
         }
 
         stage('Run Ansible Playbook') {
             steps {
                 ansiblePlaybook(
-                    credentialsId: 'ansible-ssh',
-                    installation: 'ansible2',
+                    playbook: 'installapache.yml',
                     inventory: 'inventory.ini',
-                    playbook: 'installapache.yml',   // ✅ Correct filename
-                    vaultTmpPath: ''
+                    extras: '--private-key ssh14416681627219136652.key -u devops'
                 )
             }
         }
 
         stage('Docker Build & Push') {
             steps {
+                echo "Building Docker image..."
                 script {
-                    withDockerRegistry([credentialsId: 'docker', url: 'https://index.docker.io/v1/']) {
-                        sh '''
-                        echo "Building Docker image..."
-                        docker build --no-cache -t $DOCKER_IMAGE -f Dockerfile .
-                        echo "Pushing Docker image to Docker Hub..."
-                        docker push $DOCKER_IMAGE
-                        '''
+                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_CREDENTIALS) {
+                        def app = docker.build(DOCKER_IMAGE, '-f Dockerfile .')
+                        app.push()
                     }
                 }
             }
@@ -44,18 +38,21 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                script {
-                    withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG_FILE')]) {
-                        sh '''
-                        echo "Deploying to Kubernetes..."
-                        export KUBECONFIG=$KUBECONFIG_FILE
-                        kubectl apply -f deployment.yml
-                        kubectl apply -f service.yml
-                        echo "Deployment and Service applied successfully!"
-                        '''
-                    }
-                }
+                sh '''
+                    kubectl apply -f deployment.yml
+                    kubectl apply -f service.yml
+                '''
             }
+        }
+
+    }
+
+    post {
+        success {
+            echo 'Pipeline completed successfully!'
+        }
+        failure {
+            echo 'Pipeline failed. Check logs!'
         }
     }
 }
